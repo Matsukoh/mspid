@@ -290,12 +290,23 @@ with tqdm(
             robot_obs = next_robot_obs
             humans_obs = next_humans_obs
 
-            if len(buffer) > cfg.train.batch_size:
-                # if len(buffer) > start_steps:
-                trainer.update()
-                trainer.update_target()
+            # if len(buffer) > cfg.train.batch_size:
+            #     # if len(buffer) > start_steps:
+            #     trainer.update()
+            #     trainer.update_target()
 
         if done:
+            lc_td, lc_t = trainer.update()
+            trainer.update_target()
+
+            if cfg.log.wandb:
+                wandb.log(
+                    {
+                        "loss/critic_td": lc_td,
+                        "loss/critic_t": lc_t,
+                    },
+                    step=i + 1,
+                )
             # trainer.update_imitation(epoch_num=1)
             # if info["episode"]["r"] > max_return:
             #     if not (max_return == -np.inf):

@@ -336,8 +336,18 @@ with tqdm(
             #     trainer.update_target()
 
         if done:
-            trainer.update()
+            lc_td, lc_t, la = trainer.update()
             trainer.update_target()
+
+            if cfg.log.wandb:
+                wandb.log(
+                    {
+                        "loss/critic_td": lc_td,
+                        "loss/critic_t": lc_t,
+                        "loss/actor": la,
+                    },
+                    step=i + 1,
+                )
             # if reward == 1.0:
             #     trainer.update_imitation(epoch_num=1)
             imitaion_buffer.empty()

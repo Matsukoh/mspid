@@ -62,7 +62,7 @@ class SocialMSPIDTrainer:
         r = torch.where(equal_mask, t, r)
         return r, t
 
-    def update_nclql(self, data_for_logging=None):
+    def update_nclql(self):
         sample = self.replay_buffer.sample(self.batch_size)
         r_obs, next_r_obs, h_obs, next_h_obs, act, rwd, done = list(sample.values())
         # rwd *= 0.2
@@ -150,16 +150,18 @@ class SocialMSPIDTrainer:
         (loss_critic_td + loss_critic_t).backward()
         self.critic_optimizer.step()
 
-        if data_for_logging is not None:
-            data_for_logging[0].log(
-                {
-                    "loss/critic_td": lc_td,
-                    "loss/critic_t": lc_t,
-                },
-                step=data_for_logging[1],
-            )
+        # if data_for_logging is not None:
+        #     data_for_logging[0].log(
+        #         {
+        #             "loss/critic_td": lc_td,
+        #             "loss/critic_t": lc_t,
+        #         },
+        #         step=data_for_logging[1],
+        #     )
 
-    def update(self, data_for_logging=None):
+        return lc_td, lc_t
+
+    def update(self):
         sample = self.replay_buffer.sample(self.batch_size)
         r_obs, next_r_obs, h_obs, next_h_obs, act, rwd, done = list(sample.values())
         # rwd *= 0.2
@@ -351,15 +353,17 @@ class SocialMSPIDTrainer:
         loss_actor.backward()
         self.actor_optimizer.step()
 
-        if data_for_logging is not None:
-            data_for_logging[0].log(
-                {
-                    "loss/critic_td": lc_td,
-                    "loss/critic_t": lc_t,
-                    "loss/actor": la,
-                },
-                step=data_for_logging[1],
-            )
+        # if data_for_logging is not None:
+        #     data_for_logging[0].log(
+        #         {
+        #             "loss/critic_td": lc_td,
+        #             "loss/critic_t": lc_t,
+        #             "loss/actor": la,
+        #         },
+        #         step=data_for_logging[1],
+        #     )
+
+        return lc_td, lc_t, la
 
     def update_imitation(self, epoch_num=100, data_for_logging=None):
         for e in tqdm(range(epoch_num)):
@@ -489,7 +493,7 @@ class SocialNCLQLTrainer:
         r = torch.where(equal_mask, t, r)
         return r, t
 
-    def update(self, data_for_logging=None):
+    def update(self):
         sample = self.replay_buffer.sample(self.batch_size)
         r_obs, next_r_obs, h_obs, next_h_obs, act, rwd, done = list(sample.values())
         # rwd *= 0.2
@@ -589,14 +593,16 @@ class SocialNCLQLTrainer:
         (loss_critic_td + loss_critic_t).backward()
         self.critic_optimizer.step()
 
-        if data_for_logging is not None:
-            data_for_logging[0].log(
-                {
-                    "loss/critic_td": lc_td,
-                    "loss/critic_t": lc_t,
-                },
-                step=data_for_logging[1],
-            )
+        # if data_for_logging is not None:
+        #     data_for_logging[0].log(
+        #         {
+        #             "loss/critic_td": lc_td,
+        #             "loss/critic_t": lc_t,
+        #         },
+        #         step=data_for_logging[1],
+        #     )
+
+        return lc_td, lc_t
 
     def update_target(self):
         for param, target_param in zip(
