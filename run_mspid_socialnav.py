@@ -377,34 +377,34 @@ with tqdm(
                     if i + 1 == cfg.train.total_it:
                         run.log({"Validation Table": val_table})
 
-            update_best = val_logs[1] > max_return
-            if update_best:
-                best_actor_model = copy.deepcopy(actor.state_dict())
-                best_critic_model = copy.deepcopy(critic.state_dict())
-                best_step_num = i + 1
-                max_cdr = val_logs[1]
-
-            if cfg.log.save_model:
-                torch.save(
-                    {
-                        "actor_state_dict": actor.state_dict(),
-                        "critic_state_dict": critic.state_dict(),
-                    },
-                    trained_models_dir + "/model_{}.pth".format(i + 1),
-                )
+                update_best = val_logs[1] > max_return
                 if update_best:
+                    best_actor_model = copy.deepcopy(actor.state_dict())
+                    best_critic_model = copy.deepcopy(critic.state_dict())
+                    best_step_num = i + 1
+                    max_cdr = val_logs[1]
+
+                if cfg.log.save_model:
                     torch.save(
                         {
                             "actor_state_dict": actor.state_dict(),
                             "critic_state_dict": critic.state_dict(),
                         },
-                        trained_models_dir + "/model_best.pth",
+                        trained_models_dir + "/model_{}.pth".format(i + 1),
                     )
+                    if update_best:
+                        torch.save(
+                            {
+                                "actor_state_dict": actor.state_dict(),
+                                "critic_state_dict": critic.state_dict(),
+                            },
+                            trained_models_dir + "/model_best.pth",
+                        )
 
-                # model load
-                # checkpoint = torch.load("models.pt", weights_only=True)
-                # actor.load_state_dict(checkpoint["actor_state_dict"])
-                # critic.load_state_dict(checkpoint["critic_state_dict"])
+                    # model load
+                    # checkpoint = torch.load("models.pt", weights_only=True)
+                    # actor.load_state_dict(checkpoint["actor_state_dict"])
+                    # critic.load_state_dict(checkpoint["critic_state_dict"])
 
 render = cfg.eval.render
 render_type = cfg.eval.render_type
