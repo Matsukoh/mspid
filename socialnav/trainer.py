@@ -2,7 +2,9 @@ import copy
 from typing import Literal, Optional
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import torchrl.data.replay_buffers
 from torch.func import jvp
 from tqdm import tqdm
 
@@ -10,19 +12,21 @@ from tqdm import tqdm
 class SocialMSPIDTrainer:
     def __init__(
         self,
-        ald,
-        actor,
-        critic,
-        replay_buffer,
-        imitation_buffer,
-        actor_optimizer,
-        critic_optimizer,
-        batch_size,
+        ald: nn.Module,
+        actor: nn.Module,
+        critic: nn.Module,
+        replay_buffer: torchrl.data.replay_buffers,
+        imitation_buffer: torchrl.data.replay_buffers,
+        actor_optimizer: torch.optim.Optimizer,
+        critic_optimizer: torch.optim.Optimizer,
+        batch_size: int,
         time_sampler: Literal["uniform", "logit_normal"] = "uniform",
         unequal_time_ratio: float = 0.75,
-        polyak=0.995,
-        gamma=0.99,
-        device="cpu",
+        td_sample_size: int = 10,
+        distil_sample_size: int = 10,
+        polyak: float = 0.995,
+        gamma: float = 0.99,
+        device: str = "cpu",
     ):
         self.alg_name = "MSPID"
         self.ald = ald
@@ -36,6 +40,8 @@ class SocialMSPIDTrainer:
         self.batch_size = batch_size
         self.time_sampler = time_sampler
         self.unequal_time_ratio = unequal_time_ratio
+        self.td_sample_size = td_sample_size
+        self.distil_sample_size = distil_sample_size
         self.polyak = polyak
         self.gamma = torch.as_tensor([gamma])
 
@@ -173,22 +179,21 @@ class SocialMSPIDTrainer:
             #     ),
             #     shape=(self.batch_size, self.ald.act_dim),
             # )
-            sample_size = 10
 
-            next_r_obs_repeated = next_r_obs.repeat_interleave(sample_size, dim=0).to(
-                self.device
-            )
+            next_r_obs_repeated = next_r_obs.repeat_interleave(
+                self.td_sample_size, dim=0
+            ).to(self.device)
 
-            next_h_obs_repeated = next_h_obs.repeat_interleave(sample_size, dim=0).to(
-                self.device
-            )
+            next_h_obs_repeated = next_h_obs.repeat_interleave(
+                self.td_sample_size, dim=0
+            ).to(self.device)
 
             next_act_target = self.ald.sample(
                 (
                     next_r_obs_repeated,
                     next_h_obs_repeated,
                 ),
-                shape=(self.batch_size * sample_size, self.ald.act_dim),
+                shape=(self.batch_size * self.td_sample_size, self.ald.act_dim),
             )
             L_minus_1 = torch.full((self.batch_size,), self.ald.L - 1)
             Q_target_1, Q_target_2 = self.target_critic(
@@ -197,13 +202,17 @@ class SocialMSPIDTrainer:
                     next_h_obs_repeated,
                 ),
                 next_act_target,
-                L_minus_1.repeat_interleave(sample_size, dim=0).to(self.device),
+                L_minus_1.repeat_interleave(self.td_sample_size, dim=0).to(self.device),
             )
             Q_target_min = torch.min(
                 torch.cat(
                     (
-                        Q_target_1.view(self.batch_size, sample_size, 1).mean(dim=1),
-                        Q_target_2.view(self.batch_size, sample_size, 1).mean(dim=1),
+                        Q_target_1.view(self.batch_size, self.td_sample_size, 1).mean(
+                            dim=1
+                        ),
+                        Q_target_2.view(self.batch_size, self.td_sample_size, 1).mean(
+                            dim=1
+                        ),
                     ),
                     1,
                 ),
@@ -265,8 +274,12 @@ class SocialMSPIDTrainer:
         (loss_critic_td + loss_critic_t).backward()
         self.critic_optimizer.step()
 
-        r_obs_repeated = r_obs.repeat_interleave(sample_size, dim=0).to(self.device)
-        h_obs_repeated = h_obs.repeat_interleave(sample_size, dim=0).to(self.device)
+        r_obs_repeated = r_obs.repeat_interleave(self.distil_sample_size, dim=0).to(
+            self.device
+        )
+        h_obs_repeated = h_obs.repeat_interleave(self.distil_sample_size, dim=0).to(
+            self.device
+        )
 
         act_sample = self.ald.sample(
             # (
@@ -278,12 +291,12 @@ class SocialMSPIDTrainer:
                 h_obs_repeated,
             ),
             # shape=(self.batch_size, self.ald.act_dim),
-            shape=(self.batch_size * sample_size, self.ald.act_dim),
+            shape=(self.batch_size * self.distil_sample_size, self.ald.act_dim),
         )
 
         r, t = self._sample_times(
             # batch_size=self.batch_size,
-            batch_size=self.batch_size * sample_size,
+            batch_size=self.batch_size * self.distil_sample_size,
             device=self.device,
             dtype=act_sample.dtype,
         )
@@ -447,16 +460,17 @@ class SocialMSPIDTrainer:
 class SocialNCLQLTrainer:
     def __init__(
         self,
-        ald,
-        critic,
-        replay_buffer,
-        critic_optimizer,
-        batch_size,
+        ald: nn.Module,
+        critic: nn.Module,
+        replay_buffer: torchrl.data.replay_buffers,
+        critic_optimizer: torch.optim.Optimizer,
+        batch_size: int,
         time_sampler: Literal["uniform", "logit_normal"] = "uniform",
         unequal_time_ratio: float = 0.75,
-        polyak=0.995,
-        gamma=0.99,
-        device="cpu",
+        td_sample_size: int = 10,
+        polyak: float = 0.995,
+        gamma: float = 0.99,
+        device: str = "cpu",
     ):
         self.alg_name = "NCLQL"
         self.ald = ald
@@ -467,6 +481,7 @@ class SocialNCLQLTrainer:
         self.batch_size = batch_size
         self.time_sampler = time_sampler
         self.unequal_time_ratio = unequal_time_ratio
+        self.td_sample_size = td_sample_size
         self.polyak = polyak
         self.gamma = torch.as_tensor([gamma])
 
@@ -501,22 +516,21 @@ class SocialNCLQLTrainer:
             # next_act_target = self.actor.sample(
             #     next_obs.to(self.device), shape=(self.batch_size, self.ald.act_dim)
             # )
-            sample_size = 10
 
-            next_r_obs_repeated = next_r_obs.repeat_interleave(sample_size, dim=0).to(
-                self.device
-            )
+            next_r_obs_repeated = next_r_obs.repeat_interleave(
+                self.td_sample_size, dim=0
+            ).to(self.device)
 
-            next_h_obs_repeated = next_h_obs.repeat_interleave(sample_size, dim=0).to(
-                self.device
-            )
+            next_h_obs_repeated = next_h_obs.repeat_interleave(
+                self.td_sample_size, dim=0
+            ).to(self.device)
 
             next_act_target = self.ald.sample(
                 (
                     next_r_obs_repeated,
                     next_h_obs_repeated,
                 ),
-                shape=(self.batch_size * sample_size, self.ald.act_dim),
+                shape=(self.batch_size * self.td_sample_size, self.ald.act_dim),
             )
             L_minus_1 = torch.full((self.batch_size,), self.ald.L - 1)
             Q_target_1, Q_target_2 = self.target_critic(
@@ -525,13 +539,17 @@ class SocialNCLQLTrainer:
                     next_h_obs_repeated,
                 ),
                 next_act_target,
-                L_minus_1.repeat_interleave(sample_size, dim=0).to(self.device),
+                L_minus_1.repeat_interleave(self.td_sample_size, dim=0).to(self.device),
             )
             Q_target_min = torch.min(
                 torch.cat(
                     (
-                        Q_target_1.view(self.batch_size, sample_size, 1).mean(dim=1),
-                        Q_target_2.view(self.batch_size, sample_size, 1).mean(dim=1),
+                        Q_target_1.view(self.batch_size, self.td_sample_size, 1).mean(
+                            dim=1
+                        ),
+                        Q_target_2.view(self.batch_size, self.td_sample_size, 1).mean(
+                            dim=1
+                        ),
                     ),
                     1,
                 ),
