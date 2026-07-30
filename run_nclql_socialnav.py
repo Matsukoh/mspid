@@ -84,7 +84,7 @@ else:
     device = torch.device("cpu")
     print("Using CPU")
 
-config_path = "./configs/mspid_socialnav_config.py"
+config_path = "./configs/nclql_socialnav_config.py"
 spec = importlib.util.spec_from_file_location("config", config_path)
 
 config = importlib.util.module_from_spec(spec)
