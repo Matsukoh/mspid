@@ -5,10 +5,8 @@ import os
 import random
 import shutil
 
-import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.wrappers import RecordEpisodeStatistics
 from tensordict import TensorDict
 from torchrl.data import LazyTensorStorage, ListStorage, ReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
