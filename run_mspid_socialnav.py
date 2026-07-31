@@ -230,6 +230,8 @@ trainer = SocialMSPIDTrainer(
     actor_optimizer=actor_optimizer,
     critic_optimizer=critic_optimizer,
     batch_size=cfg.train.batch_size,
+    td_sample_size=cfg.train.td_sample_size,
+    distil_sample_size=cfg.train.distil_sample_size,
     device=device,
 )
 

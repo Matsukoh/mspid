@@ -195,6 +195,7 @@ trainer = SocialNCLQLTrainer(
     replay_buffer=buffer,
     critic_optimizer=critic_optimizer,
     batch_size=cfg.train.batch_size,
+    td_sample_size=cfg.train.td_sample_size,
     device=device,
 )
 
