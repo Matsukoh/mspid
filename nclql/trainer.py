@@ -76,8 +76,8 @@ class NCLQLTrainer:
             device=self.device,
         )
 
-        sigmas = self.ald.sigma_schedule()
-        sigmas_l = sigmas[l]
+        # sigmas = self.ald.sigma_schedule()
+        sigmas_l = self.ald.sigmas[l]
         a_l = (
             act
             + sigmas_l.reshape(

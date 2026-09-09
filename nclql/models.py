@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.func import grad
 
 from utils.model_utils import SinusoidalTimeEmbedding, make_mlp, tensor_clamp
 
@@ -105,12 +106,38 @@ class AnnealedLangevinDynamics(nn.Module):
         self.q_grad_norm = q_grad_norm
         self.w = w
         self.act_dim = act_dim
-        self.act_max = torch.as_tensor(act_max, dtype=torch.float32)
-        self.act_min = torch.as_tensor(act_min, dtype=torch.float32)
-        self.act_ranges = self.act_max - self.act_min
-        self.sigma_max = sigma_max
-        self.sigma_min = sigma_min
+        # self.act_max = torch.as_tensor(act_max, dtype=torch.float32)
+        # self.act_min = torch.as_tensor(act_min, dtype=torch.float32)
+        # self.act_ranges = self.act_max - self.act_min
+        # self.sigma_max = sigma_max
+        # self.sigma_min = sigma_min
         self.step_lr = step_lr
+
+        self.register_buffer(
+            "act_max",
+            torch.as_tensor(act_max, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "act_min",
+            torch.as_tensor(act_min, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "sigmas",
+            torch.exp(
+                torch.linspace(
+                    math.log(sigma_max),
+                    math.log(sigma_min),
+                    L,
+                )
+            ),
+            persistent=False,
+        )
+
+        self.register_buffer(
+            "act_ranges",
+            self.act_max - self.act_min,
+            persistent=False,
+        )
 
     def __post_init__(self) -> None:
         if self.L <= 0 or self.T <= 0:
@@ -120,25 +147,33 @@ class AnnealedLangevinDynamics(nn.Module):
         if self.step_lr <= 0:
             raise ValueError("step_lr must be positive")
 
-    def sigma_schedule(
-        self,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-    ) -> torch.Tensor:
-        """Return the geometrically spaced noise levels."""
-        dtype = dtype or torch.get_default_dtype()
-        return torch.exp(
-            torch.linspace(
-                log(self.sigma_max),
-                log(self.sigma_min),
-                self.L,
-                device=device,
-                dtype=dtype,
-            )
-        )
+    def _energy(self, x, obs, level):
+        q1, q2 = self.model(obs, x, level)
+        return (q1 + q2).sum()
 
-    def sample(
+    def _q_grad(self, x, obs, level):
+        return grad(self._energy, argnums=0)(x, obs, level)
+
+    # def sigma_schedule(
+    #     self,
+    #     device: Optional[torch.device] = None,
+    #     dtype: Optional[torch.dtype] = None,
+    # ) -> torch.Tensor:
+    #     """Return the geometrically spaced noise levels."""
+    #     dtype = dtype or torch.get_default_dtype()
+    #     return torch.exp(
+    #         torch.linspace(
+    #             log(self.sigma_max),
+    #             log(self.sigma_min),
+    #             self.L,
+    #             device=device,
+    #             dtype=dtype,
+    #         )
+    #     )
+
+    def forward(
         self,
+        # model: nn.Module,
         obs: torch.Tensor,
         shape: Tuple[int],
         device: Optional[torch.device] = None,
@@ -172,25 +207,31 @@ class AnnealedLangevinDynamics(nn.Module):
         if not dtype.is_floating_point:
             raise TypeError("dtype must be a floating-point torch dtype")
 
-        sigmas = self.sigma_schedule(device=device, dtype=dtype)
+        # sigmas = self.sigma_schedule(device=device, dtype=dtype)
         # x = torch.empty(shape, device=device, dtype=dtype).uniform_(
         #     self.act_min, self.act_max
         # )
-        x = torch.rand(shape, device=device) * self.act_ranges.to(
-            device
-        ) + self.act_min.to(device)
+        x = torch.rand(shape, device=device) * self.act_ranges + self.act_min
+
+        # def _energy(x, obs, level):
+        #     q1, q2 = model(obs, x, level)
+        #     return (q1 + q2).sum()
+
+        # def _q_grad(x, obs, level):
+        #     return grad(_energy, argnums=0)(x, obs, level)
 
         # Detaching each iteration prevents an ever-growing autograd graph.
-        for level, sigma in enumerate(sigmas):
+        for level, sigma in enumerate(self.sigmas):
             level_tensor = torch.tensor(level, device=device, dtype=torch.long).expand(
                 shape[0]
             )
-            step_size = self.step_lr * (sigma / sigmas[-1]).square()
+            step_size = self.step_lr * (sigma / self.sigmas[-1]).square()
             for _ in range(self.T):
                 with torch.enable_grad():
                     x = x.detach().requires_grad_(True)
-                    q1, q2 = self.model(obs, x, level_tensor)
-                    grad_x = torch.autograd.grad(q1.sum() + q2.sum(), x)[0]
+                    # q1, q2 = self.model(obs, x, level_tensor)
+                    # grad_x = torch.autograd.grad(q1.sum() + q2.sum(), x)[0]
+                    grad_x = self._q_grad(x, obs, level_tensor)
 
                 if self.q_grad_norm:
                     grad_x = grad_x / (
@@ -200,6 +241,26 @@ class AnnealedLangevinDynamics(nn.Module):
                 noise = torch.randn(shape, device=device, dtype=dtype)
                 x = x + 0.5 * step_size * self.w * grad_x + step_size.sqrt() * noise
                 # x = x.clamp(self.act_min, self.act_max)
-                x = tensor_clamp(x, self.act_max.to(device), self.act_min.to(device))
+                x = tensor_clamp(x, self.act_max, self.act_min)
 
         return x.detach()
+
+    def sample(
+        self,
+        obs: torch.Tensor,
+        shape: Tuple[int],
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> torch.Tensor:
+        # return self.forward(self.model, obs, shape, device, dtype)
+        return self.forward(obs, shape, device, dtype)
+
+    # def sample_with_target_q(
+    #     self,
+    #     model: nn.Module,
+    #     obs: torch.Tensor,
+    #     shape: Tuple[int],
+    #     device: Optional[torch.device] = None,
+    #     dtype: Optional[torch.dtype] = None,
+    # ) -> torch.Tensor:
+    #     return self.forward(model, obs, shape, device, dtype)
