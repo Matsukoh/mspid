@@ -48,13 +48,14 @@ class GraphAttentionLayer(nn.Module):
         g_l = self.linear_l(h).view(n_batches, n_nodes, self.n_heads, self.h_dim)
         g_r = self.linear_r(h).view(n_batches, n_nodes, self.n_heads, self.h_dim)
 
-        g_l_repeat = g_l.repeat(1, n_nodes, 1, 1)
+        # g_l_repeat = g_l.repeat(1, n_nodes, 1, 1)
 
-        g_r_repeat_interleave = g_r.repeat_interleave(n_nodes, dim=1)
+        # g_r_repeat_interleave = g_r.repeat_interleave(n_nodes, dim=1)
 
-        g_sum = g_l_repeat + g_r_repeat_interleave
+        # g_sum = g_l_repeat + g_r_repeat_interleave
 
-        g_sum = g_sum.view(n_batches, n_nodes, n_nodes, self.n_heads, self.h_dim)
+        # g_sum = g_sum.view(n_batches, n_nodes, n_nodes, self.n_heads, self.h_dim)
+        g_sum = g_l[:, :, None, :, :] + g_r[:, None, :, :, :]
 
         e = self.attn(self.activation(g_sum))
 

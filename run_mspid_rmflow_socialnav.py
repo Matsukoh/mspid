@@ -14,7 +14,7 @@ from torchrl.data import LazyTensorStorage, ListStorage, ReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from tqdm import tqdm, trange
 
-from flow.models import MeanFlowPolicy
+from flow.models import RMFlowPolicy
 from nclql.models import AnnealedLangevinDynamics
 from rewacs.envs import CrowdSim
 from rewacs.envs.policy.policy_factory import policy_factory
@@ -28,7 +28,7 @@ from socialnav.models import (
     SocialConditionalMeanVelocityNet,
     SocialNoiseConditionedCritic,
 )
-from socialnav.trainer import SocialMSPIDTrainer
+from socialnav.trainer import SocialRMFlowTrainer
 
 try:
     import wandb
@@ -84,7 +84,7 @@ else:
     device = torch.device("cpu")
     print("Using CPU")
 
-config_path = "./configs/mspid_socialnav_config.py"
+config_path = "./configs/mspid_rmflow_socialnav_config.py"
 spec = importlib.util.spec_from_file_location("config", config_path)
 
 config = importlib.util.module_from_spec(spec)
@@ -197,7 +197,7 @@ vnet = SocialConditionalMeanVelocityNet(
     aggregator=actor_aggregator,
 )
 
-actor = MeanFlowPolicy(
+actor = RMFlowPolicy(
     vnet=vnet,
     act_dim=cfg.env.act_dim,
     act_max=cfg.env.action_space_high,
@@ -233,7 +233,7 @@ expl = ExploerCrowdSim(
     render=False,
 )
 
-trainer = SocialMSPIDTrainer(
+trainer = SocialRMFlowTrainer(
     ald=ald,
     actor=actor,
     critic=critic,
@@ -245,6 +245,7 @@ trainer = SocialMSPIDTrainer(
     batch_size=cfg.train.batch_size,
     td_sample_size=cfg.train.td_sample_size,
     distil_sample_size=cfg.train.distil_sample_size,
+    nll_weight=cfg.train.nll_weight,
     device=device,
 )
 

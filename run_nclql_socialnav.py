@@ -301,8 +301,8 @@ with tqdm(
             if cfg.log.wandb:
                 wandb.log(
                     {
-                        "loss/critic_td": lc_td,
-                        "loss/critic_t": lc_t,
+                        "loss/critic_td": lc_td.data.item(),
+                        "loss/critic_t": lc_t.data.item(),
                     },
                     step=i + 1,
                 )
