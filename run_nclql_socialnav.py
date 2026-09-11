@@ -157,7 +157,7 @@ critic = SocialNoiseConditionedCritic(
     time_dim=cfg.model.time_dim,
     h_dims=cfg.model.h_dims,
     aggregator=critic_aggregator,
-)
+).to(device)
 
 ald = AnnealedLangevinDynamics(
     model=critic,
@@ -168,13 +168,16 @@ ald = AnnealedLangevinDynamics(
     act_max=cfg.env.action_space_high,
     act_min=cfg.env.action_space_low,
     q_grad_norm=cfg.model.q_grad_norm,
-)
-
-ald = torch.compile(ald)
+).to(device)
 
 critic_optimizer = torch.optim.Adam(critic.parameters(), lr=cfg.train.lr)
 
-critic.to(device)
+ald = torch.compile(
+    ald,
+    fullgraph=True,
+    dynamic=False,
+    mode="reduce-overhead",
+)
 
 expl = ExploerCrowdSim(
     env=env,

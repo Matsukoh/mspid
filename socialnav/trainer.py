@@ -584,7 +584,7 @@ class SocialNCLQLTrainer:
         )
 
         # sigmas = self.ald.sigma_schedule()
-        sigmas_l = self.sigmas[l]
+        sigmas_l = self.ald.sigmas[l]
         a_l = (
             act.to(self.device)
             + sigmas_l.reshape(
