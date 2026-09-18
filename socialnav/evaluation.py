@@ -188,7 +188,7 @@ def eval_policy(
         print("Scenario : " + str(eval_env.test_scenario) + "-" + str(scenario))
         print("----------------------------")
         print(
-            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_mean_step_return:.3f}"
+            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Mean Step Return: {avg_mean_step_return:.3f}"
         )
         print(
             f"Success Rate {success_rate} Collision Rate: {collision_rate:.3f} Timeout Rate: {timeout_rate:.3f} Success Time: {avg_nav_time:.3f}"
