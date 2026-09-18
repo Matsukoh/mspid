@@ -26,7 +26,7 @@ def eval_policy(
     model,
     transfunc,
     convert_action,
-    discount=0.9,
+    discount=0.99,
     render=False,
     render_type="",
     path=None,
@@ -137,29 +137,41 @@ def eval_policy(
             timeout += 1
             timeout_cases.append(i)
             timeout_times.append(eval_env.time_limit)
-        cdr = sum(
-            [
-                pow(discount, t * eval_env.robot.time_step * eval_env.robot.v_pref) * r
-                for t, r in enumerate(rewards)
-            ]
-        )
+        # cdr = sum(
+        #     [
+        #         # pow(discount, t * eval_env.robot.time_step * eval_env.robot.v_pref) * r
+        #         pow(discount, t) * r
+        #         for t, r in enumerate(rewards)
+        #     ]
+        # )
+        # step_returns = []
+        # for step in range(len(rewards)):
+        #     step_return = sum(
+        #         [
+        #             # pow(discount, t * eval_env.robot.time_step * eval_env.robot.v_pref)
+        #             # * reward
+        #             pow(discount, t) * reward
+        #             for t, reward in enumerate(rewards[step:])
+        #         ]
+        #     )
+        #     step_returns.append(step_return)
+        # sum_returns += average(step_returns)
+        # del rewards[:]
+        # sum_cdrs += cdr
         step_returns = []
-        for step in range(len(rewards)):
-            step_return = sum(
-                [
-                    pow(discount, t * eval_env.robot.time_step * eval_env.robot.v_pref)
-                    * reward
-                    for t, reward in enumerate(rewards[step:])
-                ]
-            )
-            step_returns.append(step_return)
+        g = 0.0
+        for reward in reversed(rewards):
+            g = reward + discount * g
+            step_returns.append(g)
+
+        cdr = g
         sum_returns += average(step_returns)
-        del rewards[:]
         sum_cdrs += cdr
+        rewards.clear()
 
     avg_reward = sum_rewards / eval_episodes
     avg_cdr = sum_cdrs / eval_episodes
-    avg_return = sum_returns / eval_episodes
+    avg_mean_step_return = sum_returns / eval_episodes
     success_rate = success / eval_episodes
     collision_rate = collision / eval_episodes
     timeout_rate = timeout / eval_episodes
@@ -176,7 +188,7 @@ def eval_policy(
         print("Scenario : " + str(eval_env.test_scenario) + "-" + str(scenario))
         print("----------------------------")
         print(
-            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_return:.3f}"
+            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_mean_step_return:.3f}"
         )
         print(
             f"Success Rate {success_rate} Collision Rate: {collision_rate:.3f} Timeout Rate: {timeout_rate:.3f} Success Time: {avg_nav_time:.3f}"
@@ -189,7 +201,7 @@ def eval_policy(
                 header = [
                     "Average Reward",
                     "Average Cumulative Discounted Reward",
-                    "Average Return",
+                    "Average Mean Step Return",
                     "Success Rate",
                     "Collision Rate",
                     "Timeout Rate",
@@ -198,7 +210,7 @@ def eval_policy(
                 results = [
                     avg_reward,
                     avg_cdr,
-                    avg_return,
+                    avg_mean_step_return,
                     success_rate,
                     collision_rate,
                     timeout_rate,
@@ -218,7 +230,7 @@ def eval_policy(
                 )
                 f.write("----------------------------" + "\n")
                 f.write(
-                    f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_return:.3f}\n"
+                    f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Mean Step Return: {avg_mean_step_return:.3f}\n"
                 )
                 f.write(
                     f"Success Rate {success_rate} Collision Rate: {collision_rate:.3f} Timeout Rate: {timeout_rate:.3f} Success Time: {avg_nav_time:.3f}\n"
@@ -227,7 +239,7 @@ def eval_policy(
     return (
         avg_reward,
         avg_cdr,
-        avg_return,
+        avg_mean_step_return,
         success_rate,
         collision_rate,
         timeout_rate,
@@ -240,7 +252,7 @@ def eval_policy_ma(
     model,
     transfunc,
     convert_action,
-    discount=0.9,
+    discount=0.99,
     render=False,
     render_type="",
     path=None,
@@ -345,32 +357,43 @@ def eval_policy_ma(
             timeout += 1
             timeout_cases.append(i)
             timeout_times.append(eval_env.time_limit)
-        cdr = sum(
-            [
-                pow(discount, t * eval_env.time_step * eval_env.config.robot.v_pref) * r
-                for t, r in enumerate(rewards)
-            ]
-        )
+        # cdr = sum(
+        #     [
+        #         pow(discount, t * eval_env.time_step * eval_env.config.robot.v_pref) * r
+        #         for t, r in enumerate(rewards)
+        #     ]
+        # )
+        # step_returns = []
+        # for step in range(len(rewards)):
+        #     step_return = sum(
+        #         [
+        #             pow(
+        #                 discount,
+        #                 t * eval_env.time_step * eval_env.config.robot.v_pref,
+        #             )
+        #             * reward
+        #             for t, reward in enumerate(rewards[step:])
+        #         ]
+        #     )
+        #     step_returns.append(step_return)
+        # sum_returns += average(step_returns)
+        # del rewards[:]
+        # sum_cdrs += cdr
+
         step_returns = []
-        for step in range(len(rewards)):
-            step_return = sum(
-                [
-                    pow(
-                        discount,
-                        t * eval_env.time_step * eval_env.config.robot.v_pref,
-                    )
-                    * reward
-                    for t, reward in enumerate(rewards[step:])
-                ]
-            )
-            step_returns.append(step_return)
+        g = 0.0
+        for reward in reversed(rewards):
+            g = reward + discount * g
+            step_returns.append(g)
+
+        cdr = g
         sum_returns += average(step_returns)
-        del rewards[:]
         sum_cdrs += cdr
+        rewards.clear()
 
     avg_reward = sum_rewards / eval_episodes
     avg_cdr = sum_cdrs / eval_episodes
-    avg_return = sum_returns / eval_episodes
+    avg_mean_step_return = sum_returns / eval_episodes
     success_rate = success / eval_episodes
     collision_rate = collision / eval_episodes
     timeout_rate = timeout / eval_episodes
@@ -387,7 +410,7 @@ def eval_policy_ma(
         print("Scenario : " + str(eval_env.test_scenario) + "-" + str(scenario))
         print("----------------------------")
         print(
-            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_return:.3f}"
+            f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Mean Step Return: {avg_mean_step_return:.3f}"
         )
         print(
             f"Success Rate {success_rate} Collision Rate: {collision_rate:.3f} Timeout Rate: {timeout_rate:.3f} Success Time: {avg_nav_time:.3f}"
@@ -400,7 +423,7 @@ def eval_policy_ma(
                 header = [
                     "Average Reward",
                     "Average Cumulative Discounted Reward",
-                    "Average Return",
+                    "Average Mean Step Return",
                     "Success Rate",
                     "Collision Rate",
                     "Timeout Rate",
@@ -409,7 +432,7 @@ def eval_policy_ma(
                 results = [
                     avg_reward,
                     avg_cdr,
-                    avg_return,
+                    avg_mean_step_return,
                     success_rate,
                     collision_rate,
                     timeout_rate,
@@ -429,7 +452,7 @@ def eval_policy_ma(
                 )
                 f.write("----------------------------" + "\n")
                 f.write(
-                    f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Return: {avg_return:.3f}\n"
+                    f"Evaluation over {eval_episodes} Average Reward: {avg_reward:.3f} Average Cumulative Discounted Reward: {avg_cdr:.3f}, Average Mean Step Return: {avg_mean_step_return:.3f}\n"
                 )
                 f.write(
                     f"Success Rate {success_rate} Collision Rate: {collision_rate:.3f} Timeout Rate: {timeout_rate:.3f} Success Time: {avg_nav_time:.3f}\n"
@@ -438,7 +461,7 @@ def eval_policy_ma(
     return (
         avg_reward,
         avg_cdr,
-        avg_return,
+        avg_mean_step_return,
         success_rate,
         collision_rate,
         timeout_rate,

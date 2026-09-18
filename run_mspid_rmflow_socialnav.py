@@ -296,7 +296,7 @@ for i in tqdm(range(cfg.train.preliminary_exp_n)):
 #     print_results=True,
 # )
 
-max_return = -np.inf
+max_cdr = -np.inf
 with tqdm(
     range(cfg.train.total_it),
     desc=cfg.train.training_alg + " Training",
@@ -389,7 +389,7 @@ with tqdm(
                         {
                             "val/reward": val_logs[0],
                             "val/cdr": val_logs[1],
-                            "val/return": val_logs[2],
+                            "val/mean_step_return": val_logs[2],
                             "val/success_rate": val_logs[3],
                             "val/collision_rate": val_logs[4],
                             "val/timeout_rate": val_logs[5],
@@ -403,7 +403,7 @@ with tqdm(
                     if i + 1 == cfg.train.total_it:
                         run.log({"Validation Table": val_table})
 
-                update_best = val_logs[1] > max_return
+                update_best = val_logs[1] > max_cdr
                 if update_best:
                     best_actor_model = copy.deepcopy(actor.state_dict())
                     best_critic_model = copy.deepcopy(critic.state_dict())
