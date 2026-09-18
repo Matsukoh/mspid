@@ -15,3 +15,5 @@ wheels/
 !/videos/.gitkeep
 /wandb/*
 !/wandb/.gitkeep
+/evaluations/
+/models/

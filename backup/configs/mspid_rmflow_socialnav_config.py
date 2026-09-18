@@ -68,12 +68,6 @@ class TransfuncConfig(ConfigBase):
 
 
 class EvaluationConfig(ConfigBase):
-    run_path: str | None = None
-    checkpoint: str = "model_best.pth"
-    config_path: str | None = None
-    output_dir: str | None = None
-    episodes: int | None = Field(default=None, gt=0)
-    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
     eval_interval: int = 1000
     final_eval_num: int = 500
     val_render: bool = False
@@ -102,11 +96,12 @@ class TrainConfig(ConfigBase):
     polyak: float = 0.995
     td_sample_size: int = 10
     distil_sample_size: int = 10
-    training_alg: str = "MSPID"
+    nll_weight: float = 0.1
+    training_alg: str = "MSPID-RMFlow"
 
 
 class LogConfig(ConfigBase):
-    wandb_project: str = "MSPID"
+    wandb_project: str = "MSPID-RMFlow"
     # wandb_mode: str = "offline"
     wandb_mode: str = "online"
     wandb: bool = False

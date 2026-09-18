@@ -21,12 +21,6 @@ class EnvironmentConfig(ConfigBase):
     randomize_attributes: bool = False
     robot_sensor_range: float = 5
 
-    obs_dim: int = 4
-    r_obs_dim: int = 5
-    act_dim: int = 2
-    action_space_high: list[float] = [1.0, 1.0]
-    action_space_low: list[float] = [-1.0, -1.0]
-
 
 class RewardConfig(ConfigBase):
     success_reward: float = 1
@@ -61,59 +55,7 @@ class RobotConfig(ConfigBase):
     sensor: str = "coordinates"
 
 
-class TransfuncConfig(ConfigBase):
-    with_peds_vel: bool = True
-    peds_vel_as_relative: bool = True
-    use_omega: bool = True
-
-
-class EvaluationConfig(ConfigBase):
-    run_path: str | None = None
-    checkpoint: str = "model_best.pth"
-    config_path: str | None = None
-    output_dir: str | None = None
-    episodes: int | None = Field(default=None, gt=0)
-    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
-    eval_interval: int = 1000
-    final_eval_num: int = 500
-    val_render: bool = False
-    render: bool = False
-    render_type: str = "video"
-
-
-class ModelConfig(ConfigBase):
-    h_dims: list[int] = [256, 256]
-    time_dim: int = 16
-    L: int = 10
-    T: int = 2
-    w: float = 500
-    q_grad_norm: bool = True
-    projection_dim: int = 32
-    aggregator_enc_hdims: list[int] = [64]
-
-
-class TrainConfig(ConfigBase):
-    random_seed: int = 17
-    lr: float = 1e-3
-    preliminary_exp_n: int = 2000
-    total_it: int = 100000
-    batch_size: int = 256
-    buffer_capacity: int = 1000000
-    polyak: float = 0.995
-    td_sample_size: int = 10
-    distil_sample_size: int = 10
-    training_alg: str = "MSPID"
-
-
-class LogConfig(ConfigBase):
-    wandb_project: str = "MSPID"
-    # wandb_mode: str = "offline"
-    wandb_mode: str = "online"
-    wandb: bool = False
-    save_model: bool = False
-
-
-class TotalConfig(BaseSettings):
+class TestConfig(BaseSettings):
     model_config = SettingsConfigDict(
         extra="forbid",
         cli_parse_args=True,
@@ -135,13 +77,3 @@ class TotalConfig(BaseSettings):
     humans: HumansConfig = Field(default_factory=HumansConfig)
 
     robot: RobotConfig = Field(default_factory=RobotConfig)
-
-    transfunc: TransfuncConfig = Field(default_factory=TransfuncConfig)
-
-    eval: EvaluationConfig = Field(default_factory=EvaluationConfig)
-
-    model: ModelConfig = Field(default_factory=ModelConfig)
-
-    train: TrainConfig = Field(default_factory=TrainConfig)
-
-    log: LogConfig = Field(default_factory=LogConfig)

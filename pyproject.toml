@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.11.1",
     "numpy>=2.5.1",
     "pydantic-settings>=2.14.2",
+    "pyyaml>=6.0.3",
     "tensordict>=0.13.0",
     "torch>=2.13.0",
     "torchrl>=0.13.3",
