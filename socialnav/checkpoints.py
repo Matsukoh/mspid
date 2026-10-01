@@ -1,11 +1,13 @@
 """Save and restore SocialNav checkpoints for training and evaluation."""
 
+import copy
 import datetime
 import json
 from pathlib import Path
 
 import torch
 import yaml
+from pydantic_settings import CliSettingsSource
 
 METRICS = (
     "episode_reward",
@@ -57,7 +59,24 @@ def read_config(path):
     return data
 
 
-def load_evaluation_config(cli_cfg, config_type, checkpoint, checkpoint_path):
+def merge_config_overrides(saved, overrides):
+    """Merge explicitly supplied CLI leaves without changing the saved config."""
+    merged = copy.deepcopy(saved)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_config_overrides(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def load_evaluation_config(
+    cli_cfg,
+    config_type,
+    checkpoint,
+    checkpoint_path,
+    cli_overrides=None,
+):
     if cli_cfg.eval.config_path:
         data = read_config(cli_cfg.eval.config_path)
     elif "config" in checkpoint:
@@ -81,6 +100,16 @@ def load_evaluation_config(cli_cfg, config_type, checkpoint, checkpoint_path):
     # This also prevents current shell settings from altering the saved experiment.
     if not isinstance(data, dict):
         raise ValueError("Saved config must be a mapping")
+    saved_algorithm = checkpoint.get(
+        "algorithm", data.get("train", {}).get("training_alg")
+    )
+    # eval controls remain invocation-specific; logging stays disabled during evaluation.
+    overrides = {
+        key: value
+        for key, value in (cli_overrides or {}).items()
+        if key not in ("eval", "log")
+    }
+    data = merge_config_overrides(data, overrides)
     unknown = set(data) - set(config_type.model_fields)
     if unknown:
         raise ValueError(f"Unknown saved config fields: {sorted(unknown)}")
@@ -99,12 +128,12 @@ def load_evaluation_config(cli_cfg, config_type, checkpoint, checkpoint_path):
             values[name] = TypeAdapter(annotation).validate_python(data[name])
     cfg = config_type.model_construct(**values)
     expected = cli_cfg.train.training_alg
-    saved = checkpoint.get("algorithm", cfg.train.training_alg)
+    saved = saved_algorithm
     if saved != expected or cfg.train.training_alg != expected:
         raise ValueError(
             f"Algorithm mismatch: expected {expected}, checkpoint/config uses {saved}/{cfg.train.training_alg}"
         )
-    # Evaluation controls come from this invocation; model/environment/seed from training.
+    # Evaluation controls come from this invocation; other fields use the merged config.
     cfg.eval = cli_cfg.eval.model_copy(deep=True)
     cfg.log.wandb = False
     cfg.log.save_model = False
@@ -134,7 +163,31 @@ def build_evaluation_policy(cfg, checkpoint, device):
         projection_dim=cfg.model.projection_dim,
         enc_hdims=cfg.model.aggregator_enc_hdims,
     )
-    if cfg.train.training_alg == "NC-LQL":
+    if cfg.train.training_alg == "QSM":
+        from diffusion.diffusion_models import DiffusionActor
+        from diffusion.models import DMLP
+
+        model = DMLP(
+            state_dim=cfg.model.projection_dim,
+            action_dim=cfg.env.act_dim,
+            h_dims=cfg.model.h_dims,
+            t_dim=cfg.model.time_dim,
+            aggregator=aggregator,
+        )
+        policy = DiffusionActor(
+            state_dim=cfg.model.projection_dim,
+            action_dim=cfg.env.act_dim,
+            model=model,
+            act_min=cfg.env.action_space_low,
+            act_max=cfg.env.action_space_high,
+            n_timesteps=cfg.model.n_timesteps,
+            beta_schedule=cfg.model.beta_schedule,
+            clip_denoised=cfg.model.clip_denoised,
+            random_sample=cfg.model.random_sample,
+            sampling_noise_scale=cfg.model.sampling_noise_scale,
+        ).to(device)
+        load_weights(policy, checkpoint["actor_state_dict"])
+    elif cfg.train.training_alg == "NC-LQL":
         critic = SocialNoiseConditionedCritic(
             cfg.model.projection_dim + cfg.env.act_dim + cfg.model.time_dim,
             1,
@@ -182,7 +235,16 @@ def evaluate_saved_run(cli_cfg, config_type, define_env, seed_all, default_devic
 
     path = resolve_checkpoint(cli_cfg.eval.run_path, cli_cfg.eval.checkpoint)
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    cfg = load_evaluation_config(cli_cfg, config_type, checkpoint, path)
+    # The CLI source returns only explicitly provided arguments, including values
+    # equal to defaults and negative boolean flags. It excludes .env/environment.
+    cli_overrides = CliSettingsSource(config_type, cli_parse_args=True)()
+    cfg = load_evaluation_config(
+        cli_cfg,
+        config_type,
+        checkpoint,
+        path,
+        cli_overrides=cli_overrides,
+    )
     device = (
         default_device if cfg.eval.device == "auto" else torch.device(cfg.eval.device)
     )
@@ -225,6 +287,7 @@ def evaluate_saved_run(cli_cfg, config_type, define_env, seed_all, default_devic
         "seed": cfg.train.random_seed,
         "episodes": episodes,
         "discount": 0.99,
+        "cli_overrides": cli_overrides,
         "metrics": {name: float(value) for name, value in zip(METRICS, logs)},
     }
     (output / "results.json").write_text(json.dumps(result, indent=2))

@@ -10,6 +10,8 @@ from unittest.mock import Mock, patch
 
 import torch
 import yaml
+from pydantic import ValidationError
+from pydantic_settings import CliSettingsSource
 
 from socialnav.checkpoints import (
     build_evaluation_policy,
@@ -96,6 +98,71 @@ class SavedEvaluationTest(unittest.TestCase):
             self.assertEqual(loaded.eval.episodes, 3)
             self.assertFalse(loaded.log.wandb)
 
+    def test_explicit_cli_overrides_preserve_unspecified_saved_fields(self):
+        for name in ("mspid", "mspid_rmflow", "nclql"):
+            with self.subTest(algorithm=name):
+                saved = self.config(
+                    name,
+                    sim={"human_num": 12, "circle_radius": 9},
+                    env={"randomize_attributes": True, "time_limit": 45},
+                    model={"projection_dim": 64},
+                    train={"random_seed": 41},
+                ).model_dump()
+                cli = self.config(name)
+                # Explicitly restoring a default must still override the saved value.
+                args = [
+                    "--sim.human-num",
+                    "5",
+                    "--no-env.randomize-attributes",
+                    "--train.random-seed",
+                    "23",
+                ]
+                with patch.dict(os.environ, {"EXPERIMENT_SIM__CIRCLE_RADIUS": "99"}):
+                    overrides = CliSettingsSource(type(cli), cli_parse_args=args)()
+                    cfg = load_evaluation_config(
+                        cli,
+                        type(cli),
+                        {"config": saved},
+                        Path("model.pth"),
+                        overrides,
+                    )
+                self.assertEqual(cfg.sim.human_num, 5)
+                self.assertEqual(cfg.sim.circle_radius, 9)
+                self.assertFalse(cfg.env.randomize_attributes)
+                self.assertEqual(cfg.env.time_limit, 45)
+                self.assertEqual(cfg.model.projection_dim, 64)
+                self.assertEqual(cfg.train.random_seed, 23)
+                self.assertEqual(saved["sim"]["human_num"], 12)
+                self.assertTrue(saved["env"]["randomize_attributes"])
+
+    def test_json_cli_override_and_invalid_values(self):
+        cli = self.config()
+        saved = self.config(sim={"circle_radius": 9}).model_dump()
+        overrides = CliSettingsSource(
+            type(cli),
+            cli_parse_args=[
+                "--sim",
+                '{"human_num": 8}',
+            ],
+        )()
+        cfg = load_evaluation_config(
+            cli,
+            type(cli),
+            {"config": saved},
+            Path("model.pth"),
+            overrides,
+        )
+        self.assertEqual(cfg.sim.human_num, 8)
+        self.assertEqual(cfg.sim.circle_radius, 9)
+        with self.assertRaises(ValidationError):
+            load_evaluation_config(
+                cli,
+                type(cli),
+                {"config": saved},
+                Path("model.pth"),
+                {"sim": {"human_num": "invalid"}},
+            )
+
     def test_missing_config_and_wrong_algorithm_fail(self):
         cli = self.config()
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,6 +240,10 @@ class SavedEvaluationTest(unittest.TestCase):
                         "1",
                         "--eval.device",
                         "cpu",
+                        "--sim.human-num",
+                        "2",
+                        "--train.random-seed",
+                        "23",
                         "--eval.output-dir",
                         str(output),
                     ],
@@ -186,6 +257,10 @@ class SavedEvaluationTest(unittest.TestCase):
                 self.assertEqual(report["algorithm"], cfg.train.training_alg)
                 self.assertEqual(report["episodes"], 1)
                 self.assertEqual(report["step"], 100)
+                self.assertEqual(report["seed"], 23)
+                evaluated_cfg = json.loads((output / "config.json").read_text())
+                self.assertEqual(evaluated_cfg["sim"]["human_num"], 2)
+                self.assertEqual(evaluated_cfg["env"]["time_limit"], 2)
                 self.assertEqual(len(report["metrics"]), 7)
                 self.assertTrue((output / "results.csv").is_file())
                 self.assertNotIn("Training:", result.stderr)

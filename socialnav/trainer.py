@@ -625,3 +625,105 @@ class SocialNCLQLTrainer:
         ):
             target_param.data.mul_(self.polyak)
             target_param.data.add_((1 - self.polyak) * param.data)
+
+
+class SocialQSMTrainer:
+    """Legacy QSM: fit diffusion output to -M times the mean twin-Q gradient."""
+
+    def __init__(
+        self,
+        actor: nn.Module,
+        critic: nn.Module,
+        replay_buffer,
+        actor_optimizer: torch.optim.Optimizer,
+        critic_optimizer: torch.optim.Optimizer,
+        batch_size: int,
+        target_actor: nn.Module | None = None,
+        target_critic: nn.Module | None = None,
+        polyak: float = 0.995,
+        gamma: float = 0.99,
+        M: float = 50.0,
+        use_eta: bool = True,
+        device: str = "cpu",
+    ):
+        if batch_size < 1 or M <= 0:
+            raise ValueError("batch_size and M must be positive")
+        if not 0 <= gamma <= 1 or not 0 <= polyak <= 1:
+            raise ValueError("gamma and polyak must be in [0, 1]")
+        self.alg_name = "QSM"
+        self.device = device
+        self.actor = actor
+        self.critic = critic
+        self.target_actor = (
+            (copy.deepcopy(actor) if target_actor is None else target_actor)
+            .to(device)
+            .requires_grad_(False)
+        )
+        self.target_critic = (
+            (copy.deepcopy(critic) if target_critic is None else target_critic)
+            .to(device)
+            .requires_grad_(False)
+        )
+        self.replay_buffer = replay_buffer
+        self.actor_optimizer = actor_optimizer
+        self.critic_optimizer = critic_optimizer
+        self.batch_size = batch_size
+        self.polyak = polyak
+        self.gamma = gamma
+        self.M = M
+        self.eta = 1e-16 if use_eta else 0.0
+
+    def q_actions_grad(self, obs, actions):
+        # One backward pass handles a shared observation encoder in both Q heads.
+        with torch.enable_grad():
+            actions = actions.detach().requires_grad_(True)
+            q1, q2 = self.critic(obs, actions)
+            gradient = torch.autograd.grad(((q1 + q2) * 0.5).sum(), actions)[0]
+        return gradient.detach()
+
+    def update(self):
+        sample = self.replay_buffer.sample(self.batch_size)
+        # Access by name: TensorDict insertion order is not part of the schema.
+        obs = tuple(sample[key].to(self.device) for key in ("robot_obs", "humans_obs"))
+        next_obs = tuple(
+            sample[key].to(self.device) for key in ("next_robot_obs", "next_humans_obs")
+        )
+        actions = sample["action"].to(self.device).reshape(-1, self.actor.act_dim)
+        batch_size = actions.shape[0]
+        reward = sample["reward"].to(self.device).reshape(batch_size, 1)
+        done = sample["done"].to(self.device).reshape(batch_size, 1).to(actions.dtype)
+
+        with torch.no_grad():
+            next_actions = self.target_actor.sample(
+                next_obs, shape=(batch_size, self.actor.act_dim)
+            )
+            target_q1, target_q2 = self.target_critic(next_obs, next_actions)
+            target_q = reward + self.gamma * (1 - done) * torch.minimum(
+                target_q1, target_q2
+            )
+        q1, q2 = self.critic(obs, actions)
+        critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+        self.critic_optimizer.zero_grad(set_to_none=True)
+
+        t = torch.randint(self.actor.n_timesteps, (batch_size,), device=self.device)
+        noisy_actions = self.actor.q_sample(actions, t)
+        q_gradient = self.q_actions_grad(obs, noisy_actions)
+        prediction = self.actor.model(noisy_actions, t, obs)
+        actor_loss = F.mse_loss(prediction, -self.M * (q_gradient + self.eta))
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+        return critic_loss.detach(), actor_loss.detach()
+
+    @torch.no_grad()
+    def update_target(self):
+        # QSM bootstraps with both a slowly updated policy and a slowly updated Q.
+        for model, target in (
+            (self.actor, self.target_actor),
+            (self.critic, self.target_critic),
+        ):
+            for param, target_param in zip(model.parameters(), target.parameters()):
+                target_param.mul_(self.polyak).add_(param, alpha=1 - self.polyak)
