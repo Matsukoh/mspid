@@ -727,3 +727,122 @@ class SocialQSMTrainer:
         ):
             for param, target_param in zip(model.parameters(), target.parameters()):
                 target_param.mul_(self.polyak).add_(param, alpha=1 - self.polyak)
+
+
+class SocialSACTrainer:
+    """SAC with a learned entropy coefficient and a Polyak target critic."""
+
+    def __init__(
+        self,
+        actor,
+        critic,
+        replay_buffer,
+        actor_optimizer,
+        critic_optimizer,
+        batch_size,
+        target_critic=None,
+        polyak=0.995,
+        gamma=0.99,
+        init_alpha=0.2,
+        alpha_lr=3e-4,
+        target_entropy=None,
+        device="cpu",
+    ):
+        if batch_size < 1 or init_alpha <= 0 or alpha_lr <= 0:
+            raise ValueError("batch_size, init_alpha and alpha_lr must be positive")
+        if not 0 <= polyak <= 1 or not 0 <= gamma <= 1:
+            raise ValueError("polyak and gamma must be in [0, 1]")
+        self.alg_name = "SAC"
+        self.actor = actor
+        self.critic = critic
+        self.target_critic = (
+            (copy.deepcopy(critic) if target_critic is None else target_critic)
+            .to(device)
+            .requires_grad_(False)
+        )
+        self.replay_buffer = replay_buffer
+        self.actor_optimizer = actor_optimizer
+        self.critic_optimizer = critic_optimizer
+        self.batch_size = batch_size
+        self.polyak = polyak
+        self.gamma = gamma
+        self.device = device
+        self.target_entropy = (
+            -float(actor.act_dim) if target_entropy is None else float(target_entropy)
+        )
+        self.log_alpha = nn.Parameter(torch.tensor(init_alpha, device=device).log())
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
+
+    @property
+    def alpha(self):
+        return self.log_alpha.exp().detach()
+
+    def update(self):
+        sample = self.replay_buffer.sample(self.batch_size)
+        obs = tuple(sample[key].to(self.device) for key in ("robot_obs", "humans_obs"))
+        next_obs = tuple(
+            sample[key].to(self.device) for key in ("next_robot_obs", "next_humans_obs")
+        )
+        actions = sample["action"].to(self.device).reshape(-1, self.actor.act_dim)
+        batch_size = actions.shape[0]
+        reward = sample["reward"].to(self.device).reshape(batch_size, 1)
+        done = sample["done"].to(self.device).reshape(batch_size, 1).to(actions.dtype)
+        alpha = self.alpha
+        with torch.no_grad():
+            next_actions, next_log_prob = self.actor.sample_with_log_prob(next_obs)
+            target_q1, target_q2 = self.target_critic(next_obs, next_actions)
+            target_q = reward + self.gamma * (1 - done) * (
+                torch.minimum(target_q1, target_q2) - alpha * next_log_prob
+            )
+        q1, q2 = self.critic(obs, actions)
+        critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+        self.critic_optimizer.zero_grad(set_to_none=True)
+
+        # Keep gradients through the sampled action, without accumulating Q gradients.
+        parameters = list(self.critic.parameters())
+        requires_grad = [p.requires_grad for p in parameters]
+        try:
+            self.critic.requires_grad_(False)
+            sampled_actions, log_prob = self.actor.sample_with_log_prob(obs)
+            policy_q1, policy_q2 = self.critic(obs, sampled_actions)
+            actor_loss = (alpha * log_prob - torch.minimum(policy_q1, policy_q2)).mean()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+        finally:
+            for parameter, enabled in zip(parameters, requires_grad):
+                parameter.requires_grad_(enabled)
+
+        alpha_loss = -(
+            self.log_alpha * (log_prob.detach() + self.target_entropy)
+        ).mean()
+        self.alpha_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optimizer.step()
+        self.last_entropy = -log_prob.detach().mean()
+        return critic_loss.detach(), actor_loss.detach(), alpha_loss.detach()
+
+    @torch.no_grad()
+    def update_target(self):
+        for parameter, target in zip(
+            self.critic.parameters(), self.target_critic.parameters()
+        ):
+            target.mul_(self.polyak).add_(parameter, alpha=1 - self.polyak)
+
+    def state_dict(self):
+        return {
+            "log_alpha": self.log_alpha.detach().clone(),
+            "target_entropy": self.target_entropy,
+            "alpha_optimizer": self.alpha_optimizer.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+        }
+
+    def load_state_dict(self, state):
+        with torch.no_grad():
+            self.log_alpha.copy_(state["log_alpha"].to(self.device))
+        self.target_entropy = float(state["target_entropy"])
+        self.alpha_optimizer.load_state_dict(state["alpha_optimizer"])
+        self.target_critic.load_state_dict(state["target_critic"])

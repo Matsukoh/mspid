@@ -2,13 +2,14 @@
 
 ## Evaluating trained SocialNav models
 
-All four SocialNav scripts support evaluation without training. Pass `--eval.run-path` to load a saved model and evaluate it on the `test` scenario. Without this option, the scripts train as usual.
+All five SocialNav scripts support evaluation without training. Pass `--eval.run-path` to load a saved model and evaluate it on the `test` scenario. Without this option, the scripts train as usual.
 
 ```bash
 python run_mspid_socialnav.py --eval.run-path ./wandb/run-XXXX
 python run_mspid_rmflow_socialnav.py --eval.run-path ./wandb/run-YYYY
 python run_nclql_socialnav.py --eval.run-path ./wandb/run-ZZZZ
 python run_qsm_socialnav.py --eval.run-path ./wandb/run-QSM
+python run_sac_socialnav.py --eval.run-path ./wandb/run-SAC
 ```
 
 The path can point to a local W&B run directory, its `files/` or `trained_models/` directory, or a `.pth` checkpoint file. For directory paths, the default checkpoint is `model_best.pth` in the corresponding `trained_models/` directory. Downloading runs from online W&B URLs or run IDs is not supported.
@@ -41,7 +42,7 @@ python run_mspid_socialnav.py \
   --eval.output-dir ./evaluations/humans_10
 ```
 
-The same options work for all four scripts. `eval.*` controls use the current invocation's settings, and evaluation always disables W&B logging and model saving. The effective configuration is saved in `config.json`, and explicit CLI arguments are recorded in `results.json` under `cli_overrides`. Changes to model dimensions must remain compatible with the saved weights; incompatible weights fail strict loading. Changing the reward configuration also changes the meaning of reward-based metrics such as CDR.
+The same options work for all five scripts. `eval.*` controls use the current invocation's settings, and evaluation always disables W&B logging and model saving. The effective configuration is saved in `config.json`, and explicit CLI arguments are recorded in `results.json` under `cli_overrides`. Changes to model dimensions must remain compatible with the saved weights; incompatible weights fail strict loading. Changing the reward configuration also changes the meaning of reward-based metrics such as CDR.
 
 Configuration sources are checked in this order: an explicitly supplied configuration file, the checkpoint's embedded `config`, then `config.json` or `config.yaml` in the checkpoint directory or its parent. For legacy checkpoints without an available configuration, supply `--eval.config-path`. Copied `config.py` files are not loaded because they do not capture CLI overrides used during training. Legacy actor checkpoints saved after compilation are also supported.
 
@@ -106,4 +107,56 @@ learning performance has not been verified by the smoke tests.
 
 ```bash
 python -m unittest discover -s tests -p 'test_qsm.py' -v
+```
+
+## Training SAC on SocialNav
+
+`run_sac_socialnav.py` trains Soft Actor-Critic with automatic entropy tuning.
+It uses the common robot-frame observations, separate actor/critic GAT encoders,
+ORCA preliminary exploration, validation CDR selection, and saved-run evaluation.
+The Gaussian policy and twin Q heads are in `sac/models.py`, the algorithm is
+`SocialSACTrainer` in `socialnav/trainer.py`, and settings are in
+`configs/sac_socialnav_config.py`.
+
+```bash
+python run_sac_socialnav.py --log.save-model --train.random-seed 17
+python run_sac_socialnav.py --log.wandb --log.save-model
+python run_sac_socialnav.py --eval.run-path ./models/<run>/trained_models/model_best.pth \
+  --eval.episodes 100 --eval.device cpu
+```
+
+The policy uses reparameterized Gaussian samples, tanh squashing, and an affine
+transform to per-dimension action bounds. Log probabilities include both
+transform Jacobians and use a stable correction for saturated tanh outputs.
+The critic target is `reward + gamma * (1 - done) * (min(target_Q1, target_Q2)
+- alpha * next_log_prob)`. The actor minimizes `alpha * log_prob - min(Q1, Q2)`.
+Only the critic has a Polyak target network; there is no target actor.
+
+`log_alpha` is optimized automatically using the detached policy log probability.
+`--train.init-alpha` defaults to 0.2, `--train.alpha-lr` to 0.0003, and
+`--train.target-entropy` defaults to minus the action dimension (-2 here).
+Entropy is measured with respect to the configured action coordinates, including
+scaling. W&B records actor/critic/temperature losses, `train/alpha`, and
+`train/entropy`. Checkpoints include `trainer_state_dict` with the learned
+`log_alpha`, target entropy, alpha optimizer state, and target critic weights.
+Evaluation only needs the actor weights; this runner does not provide a training
+resume CLI.
+
+Validation and test evaluation use the squashed Gaussian mean by default.
+Use `--no-eval.deterministic` for stochastic evaluation. Training always samples
+stochastically. `--train.lr` defaults to 0.0003, `--train.gamma` to 0.99, and
+`--train.polyak` to 0.995 (the retained target weight).
+`--train.updates-per-episode` defaults to 1 to match the existing SocialNav
+runners; increase it explicitly for more replay updates. Preliminary ORCA
+exploration stores transitions without gradient updates. Align episode counts,
+update budgets, environment settings, and seeds when comparing methods.
+Terminal transitions, including timeouts, use the existing SocialNav `done`
+convention and do not bootstrap. Validation also runs at the final episode.
+
+CPU smoke tests cover short training, model saving/loading, evaluation,
+action-density corrections, terminal masking, temperature update direction,
+and Polyak updates. Full-length learning performance has not been verified.
+
+```bash
+python -m unittest discover -s tests -p 'test_sac.py' -v
 ```

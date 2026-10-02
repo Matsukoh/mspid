@@ -163,7 +163,22 @@ def build_evaluation_policy(cfg, checkpoint, device):
         projection_dim=cfg.model.projection_dim,
         enc_hdims=cfg.model.aggregator_enc_hdims,
     )
-    if cfg.train.training_alg == "QSM":
+    if cfg.train.training_alg == "SAC":
+        from sac.models import SocialGaussianPolicy
+
+        policy = SocialGaussianPolicy(
+            obs_dim=cfg.model.projection_dim,
+            act_dim=cfg.env.act_dim,
+            aggregator=aggregator,
+            h_dims=cfg.model.h_dims,
+            act_min=cfg.env.action_space_low,
+            act_max=cfg.env.action_space_high,
+            log_std_min=cfg.model.log_std_min,
+            log_std_max=cfg.model.log_std_max,
+            deterministic_eval=cfg.eval.deterministic,
+        ).to(device)
+        load_weights(policy, checkpoint["actor_state_dict"])
+    elif cfg.train.training_alg == "QSM":
         from diffusion.diffusion_models import DiffusionActor
         from diffusion.models import DMLP
 

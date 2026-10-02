@@ -45,6 +45,20 @@
             "request": "launch",
             "program": "./run_nclql_socialnav.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "run_qsm_socialnav",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./run_qsm_socialnav.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "run_sac_socialnav",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./run_sac_socialnav.py",
+            "console": "integratedTerminal"
         }
     ]
 }
