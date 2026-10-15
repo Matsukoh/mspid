@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.functional import relu
 
 
 class GraphAttentionLayer(nn.Module):
@@ -71,3 +72,23 @@ class GraphAttentionLayer(nn.Module):
             return attn_res.reshape(n_batches, n_nodes, self.n_heads * self.h_dim)
         else:
             return attn_res.mean(dim=1)
+
+
+class GCLayer(nn.Module):
+    def __init__(self, d, D, device="cpu"):
+        super(GCLayer, self).__init__()
+        self.d = d
+        self.D = D
+        self.device = device
+        self.W = nn.Parameter(torch.randn(d, D))
+
+    def to(self, device):
+        super().to(device)
+        self.device = device
+
+    def forward(self, X, A):
+        X_gc = torch.matmul(A, X)
+
+        gc = torch.matmul(X_gc, self.W)
+        out = relu(gc)
+        return out
