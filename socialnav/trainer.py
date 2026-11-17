@@ -400,6 +400,63 @@ class SocialMSPIDTrainer:
             target_param.data.add_((1 - self.polyak) * param.data)
 
 
+class SocialMSPIDBITrainer(SocialMSPIDTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.alg_name = "MSPID-BI"
+
+    def _bi_loss(
+        self,
+        actions: torch.Tensor,
+        obs: tuple[torch.Tensor, torch.Tensor],
+    ) -> torch.Tensor:
+        """Compute the reverse-time conditional MeanFlow matching loss."""
+        actions = actions.to(self.device)
+        obs = tuple(value.to(self.device) for value in obs)
+        batch_size = actions.shape[0]
+        r, t = self._sample_times(
+            batch_size=batch_size,
+            device=actions.device,
+            dtype=actions.dtype,
+        )
+
+        # This project uses data at time 0 and Gaussian noise at time 1.
+        noise = torch.zeros_like(actions)
+        actions = torch.zeros_like(actions)
+        t_column = t[:, None]
+        x_t = (1.0 - t_column) * actions + t_column * noise
+        v_t = noise - actions
+        interval = (t - r)[:, None]
+
+        u_prediction = self.actor.vnet(x_t, obs, r, t)
+
+        def model_along_path(
+            current_x: torch.Tensor,
+            current_r: torch.Tensor,
+            current_t: torch.Tensor,
+        ) -> torch.Tensor:
+            return self.actor.vnet(current_x, obs, current_r, current_t)
+
+        _, du_dt = jvp(
+            model_along_path,
+            primals=(x_t, r, t),
+            tangents=(v_t, torch.zeros_like(r), torch.ones_like(t)),
+        )
+
+        # Reverse-time form of equation (4): u = v - (t-r) D_t u.
+        u_target = (v_t - interval * du_dt).detach()
+        return (u_prediction - u_target).square().mean()
+
+    def _actor_loss(
+        self,
+        actions: torch.Tensor,
+        obs: tuple[torch.Tensor, torch.Tensor],
+    ) -> torch.Tensor:
+        return self._conditional_mean_flow_loss(actions, obs) + self._bi_loss(
+            actions, obs
+        )
+
+
 class SocialRMFlowTrainer(SocialMSPIDTrainer):
     """MSPID trainer whose actor objective is the RMFlow objective."""
 
