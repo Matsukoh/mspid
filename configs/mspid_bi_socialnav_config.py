@@ -102,11 +102,11 @@ class TrainConfig(ConfigBase):
     polyak: float = 0.995
     td_sample_size: int = 10
     distil_sample_size: int = 10
-    training_alg: str = "MSPID"
+    training_alg: str = "MSPID-BI"
 
 
 class LogConfig(ConfigBase):
-    wandb_project: str = "MSPID"
+    wandb_project: str = "MSPID-BI"
     # wandb_mode: str = "offline"
     wandb_mode: str = "online"
     wandb: bool = False
