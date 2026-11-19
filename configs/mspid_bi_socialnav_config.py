@@ -90,6 +90,7 @@ class ModelConfig(ConfigBase):
     q_grad_norm: bool = True
     projection_dim: int = 32
     aggregator_enc_hdims: list[int] = [64]
+    uniform_z: bool = True
 
 
 class TrainConfig(ConfigBase):

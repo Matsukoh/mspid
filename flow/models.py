@@ -67,10 +67,12 @@ class MeanFlowPolicy(nn.Module):
         act_dim: int,
         act_max: list[float],
         act_min: list[float],
+        uniform_z: bool = False,
     ):
         super().__init__()
         self.vnet = vnet
         self.act_dim = act_dim
+        self.uniform_z = uniform_z
         # self.act_max = torch.as_tensor(act_max, dtype=torch.float32)
         # self.act_min = torch.as_tensor(act_min, dtype=torch.float32)
         self.register_buffer(
@@ -115,12 +117,25 @@ class MeanFlowPolicy(nn.Module):
                     dtype=torch.float32,
                 )
             else:
-                x = torch.randn(
-                    batch_size,
-                    self.act_dim,
-                    device=device,
-                    dtype=torch.float32,
-                )
+                if self.uniform_z:
+                    x = (
+                        2
+                        * torch.rand(
+                            batch_size,
+                            self.act_dim,
+                            device=device,
+                            dtype=torch.float32,
+                        )
+                        - 1
+                    )
+
+                else:
+                    x = torch.randn(
+                        batch_size,
+                        self.act_dim,
+                        device=device,
+                        dtype=torch.float32,
+                    )
         else:
             if noise.shape != (batch_size, self.act_dim):
                 raise ValueError(

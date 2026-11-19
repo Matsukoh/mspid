@@ -211,6 +211,7 @@ def main():
         act_dim=cfg.env.act_dim,
         act_max=cfg.env.action_space_high,
         act_min=cfg.env.action_space_low,
+        uniform_z=cfg.model.uniform_z,
     ).to(device)
 
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=cfg.train.lr)
